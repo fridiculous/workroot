@@ -1,0 +1,99 @@
+name: Release Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Expected Cargo.toml version, without leading v. Leave blank to use Cargo.toml."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Pre-tag release gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Validate release input
+        id: release
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          version="$(python3 - <<'PY'
+          import pathlib
+          import re
+
+          text = pathlib.Path("Cargo.toml").read_text()
+          match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+          if not match:
+              raise SystemExit("Cargo.toml does not contain a package version")
+          print(match.group(1))
+          PY
+          )"
+          tag="v$version"
+
+          if [ -n "${EXPECTED_VERSION:-}" ] && [ "$EXPECTED_VERSION" != "$version" ]; then
+            echo "workflow input version '$EXPECTED_VERSION' does not match Cargo.toml version '$version'" >&2
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "Release Gate should be run from main, not '${GITHUB_REF_NAME}'." >&2
+            exit 1
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test
+      - name: Validate package contents
+        run: cargo package --locked --list
+      - name: Publish dry run
+        run: cargo publish --dry-run --locked
+      - name: Write release summary
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          {
+            echo "## Release gate passed"
+            echo
+            echo "- Version: \`$VERSION\`"
+            echo "- Tag to create: \`$TAG\`"
+            echo "- Tested commit: \`$sha\`"
+            echo
+            echo "Next step:"
+            echo
+            echo "Run the **Release Binaries** workflow from \`main\` with:"
+            echo
+            echo "- Version: \`$VERSION\`"
+            echo "- Publish: \`true\`"
+            echo
+            echo "Fallback local tag commands:"
+            echo
+            echo '```bash'
+            echo "git fetch origin main --tags"
+            echo "git tag $TAG $sha"
+            echo "git push origin $TAG"
+            echo '```'
+            echo
+            echo "After the tag workflow publishes assets, run the **Verify Release** workflow for \`$TAG\`."
+          } >> "$GITHUB_STEP_SUMMARY"

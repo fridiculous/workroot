@@ -1,0 +1,88 @@
+name: Verify Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to verify, for example v0.0.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify release assets
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Verify GitHub release and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_assets=(
+            "workroot-aarch64-apple-darwin.tar.gz"
+            "workroot-x86_64-apple-darwin.tar.gz"
+            "workroot-x86_64-unknown-linux-gnu.tar.gz"
+          )
+
+          gh release view "$TAG" --repo "$REPO" --json tagName,isDraft,isPrerelease,assets > release.json
+
+          python3 - <<'PY'
+          import json
+
+          required = {
+              "workroot-aarch64-apple-darwin.tar.gz",
+              "workroot-x86_64-apple-darwin.tar.gz",
+              "workroot-x86_64-unknown-linux-gnu.tar.gz",
+          }
+          data = json.load(open("release.json"))
+          names = {asset["name"] for asset in data["assets"]}
+          missing = sorted(required - names)
+          if data["isDraft"]:
+              raise SystemExit("release is still a draft")
+          if data["isPrerelease"]:
+              raise SystemExit("release is marked as a prerelease; final release expected")
+          if missing:
+              raise SystemExit("missing required assets: " + ", ".join(missing))
+          PY
+
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+          sha_file="$tmp_dir/SHA256SUMS.txt"
+
+          for asset in "${required_assets[@]}"; do
+            gh release download "$TAG" --repo "$REPO" --pattern "$asset" --dir "$tmp_dir"
+
+            target="${asset#workroot-}"
+            target="${target%.tar.gz}"
+            tar -tzf "$tmp_dir/$asset" > "$tmp_dir/$asset.contents"
+            grep -qx "workroot-$target" "$tmp_dir/$asset.contents"
+            grep -qx "wr-$target" "$tmp_dir/$asset.contents"
+
+            sha256sum "$tmp_dir/$asset" >> "$sha_file"
+          done
+
+          sort -k2 "$sha_file" -o "$sha_file"
+
+          {
+            echo "## Release verification passed"
+            echo
+            echo "- Repository: \`$REPO\`"
+            echo "- Tag: \`$TAG\`"
+            echo "- Required assets: present"
+            echo "- Tarball contents: each archive contains \`workroot-<target>\` and \`wr-<target>\`"
+            echo
+            echo "SHA256 values for downstream packaging:"
+            echo
+            echo '```text'
+            cat "$sha_file"
+            echo '```'
+            echo
+            echo "Homebrew may now be updated using these SHA256 values."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,159 @@
+name: Release Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Expected Cargo.toml version, without leading v. Leave blank to use Cargo.toml."
+        required: false
+        type: string
+      publish:
+        description: "Publish the final GitHub Release from the selected main commit."
+        required: true
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  validate:
+    name: Validate release ref
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate version and tag
+        id: version
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+          PUBLISH_FINAL: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+
+          publish="${PUBLISH_FINAL:-false}"
+          version="$(python3 - <<'PY'
+          import pathlib
+          import re
+
+          text = pathlib.Path("Cargo.toml").read_text()
+          match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+          if not match:
+              raise SystemExit("Cargo.toml does not contain a package version")
+          print(match.group(1))
+          PY
+          )"
+          tag="v$version"
+
+          case "$publish" in
+            true|false) ;;
+            *) echo "publish must be true or false, got '$publish'" >&2; exit 1 ;;
+          esac
+
+          if [ -n "${EXPECTED_VERSION:-}" ] && [ "$EXPECTED_VERSION" != "$version" ]; then
+            echo "workflow input version '$EXPECTED_VERSION' does not match Cargo.toml version '$version'" >&2
+            exit 1
+          fi
+
+          if [ "$publish" = "true" ] && [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "manual final publish must run from main, not '$GITHUB_REF_NAME'" >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            ref_tag="${GITHUB_REF#refs/tags/}"
+            if [ "$ref_tag" != "$tag" ]; then
+              echo "tag '$ref_tag' does not match Cargo.toml version '$version'; expected '$tag'" >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/workroot dist/workroot-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/wr dist/wr-${{ matrix.target }}
+          tar -C dist -czf dist/workroot-${{ matrix.target }}.tar.gz workroot-${{ matrix.target }} wr-${{ matrix.target }}
+          shasum -a 256 dist/workroot-${{ matrix.target }}.tar.gz > dist/workroot-${{ matrix.target }}.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workroot-${{ matrix.target }}
+          path: |
+            dist/workroot-${{ matrix.target }}.tar.gz
+            dist/workroot-${{ matrix.target }}.tar.gz.sha256
+          retention-days: 14
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs:
+      - validate
+      - build
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Build SHA256 manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && shasum -a 256 ./*.tar.gz | sed 's#  \./#  #' | sort) > dist/SHA256SUMS.txt
+      - name: Create release and upload assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          assets=(dist/workroot-*.tar.gz dist/workroot-*.tar.gz.sha256 dist/SHA256SUMS.txt)
+          args=(
+            release create "$TAG"
+            --repo "$GITHUB_REPOSITORY"
+            --target "$GITHUB_SHA"
+            --title "$TAG"
+            --generate-notes
+          )
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            args+=(--verify-tag)
+          fi
+
+          gh "${args[@]}" "${assets[@]}"
