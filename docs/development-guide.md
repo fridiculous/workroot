@@ -85,7 +85,7 @@ cargo run -- path workroot base
 For tmux-backed flows, use an indexed worktree and run:
 
 ```bash
-cargo run -- run workroot base -- make test
+cargo run -- run workroot base -- cargo test
 ```
 
 For prune changes, always test against a disposable repository first. The prune flow should continue to show proof evidence before any removal.
