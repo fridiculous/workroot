@@ -1,3 +1,9 @@
+<!--
+Use a Conventional Commit title for this PR and for the first commit on the branch.
+Examples: feat: add worktree ignore command, fix: keep path output stdout-only, docs: clarify shell integration setup.
+This keeps squash-merge commit titles predictable.
+-->
+
 ## Summary
 
 Describe what changed and why.
@@ -24,3 +30,4 @@ cargo test
 - [ ] Tests added or updated when behavior changed
 - [ ] README/help/docs updated if the public contract changed
 - [ ] Output contracts were considered for stdout vs stderr
+- [ ] PR title and first commit use Conventional Commits format
