@@ -1,13 +1,15 @@
 use std::path::Path;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use serde::Serialize;
 
 use crate::discovery;
 use crate::domain::SessionStatus;
 use crate::error::{AppError, AppResult};
 use crate::git::Git;
 use crate::prune::{prune_merged_interactive, prune_report};
-use crate::resolver::Resolver;
+use crate::push::PushOutcome;
+use crate::resolver::{ResolvedWorktree, Resolver};
 use crate::session::{
     CommandSpec, ExistingSession, Tmux, find_session_mut, sanitize_tmux_session_name,
     upsert_running_session,
@@ -21,20 +23,20 @@ use crate::storage::FileStorage;
 
 const GLOBAL_HELP: &str = r#"Worktree lifecycle:
   [1mnew[0m          Create a target worktree from the repo base branch
-               workroot new <project> <worktree>
+               workroot new [-o json] <project> <worktree>
 
   [1mpush[0m         Push a target branch to its remote
-               workroot push <project> <worktree>
+               workroot push [-o json] <project> <worktree>
 
   [1mprune[0m        Remove merged worktrees with proof and confirmation
                workroot prune [<project> [<worktree>]]
 
 Navigation:
   [1mstatus[0m       Show worktrees; --json for scripts
-               workroot status [--json] [--refresh] [<project> [<worktree>]]
+               workroot status [-o json|--json] [--refresh] [<project> [<worktree>]]
 
   [1mpath[0m         Print a target path for scripts and command substitution
-               workroot path <project> [<worktree>]
+               workroot path [-o json] <project> [<worktree>]
 
   [1mcd[0m           Change directory through shell integration
                workroot cd <project> [<worktree>]
@@ -69,20 +71,21 @@ Run `workroot shell-init <shell>` to set up directory switching.
 GitHub: https://github.com/fridiculous/workroot"#;
 
 const STATUS_HELP: &str = r#"Command shapes:
-  workroot status [--json] [--refresh]
-  workroot status [--json] [--refresh] <project>
-  workroot status [--json] [--refresh] <project> <worktree>
+  workroot status [-o json|--json] [--refresh]
+  workroot status [-o json|--json] [--refresh] <project>
+  workroot status [-o json|--json] [--refresh] <project> <worktree>
 
 Examples:
-  workroot status --json my-app my-feature
+  workroot status -o json my-app my-feature
   workroot status --refresh my-app"#;
 
 const PATH_HELP: &str = r#"Command shapes:
-  workroot path <project>
-  workroot path <project> <worktree>
+  workroot path [-o json] <project>
+  workroot path [-o json] <project> <worktree>
 
 Examples:
-  workroot path my-app my-feature"#;
+  workroot path my-app my-feature
+  workroot path -o json my-app my-feature"#;
 
 const CD_HELP: &str = r##"Command shapes:
   workroot cd <project>
@@ -95,10 +98,11 @@ Install shell integration first:
   eval "$(workroot shell-init zsh)""##;
 
 const NEW_HELP: &str = r#"Command shape:
-  workroot new <project> <worktree>
+  workroot new [-o json] <project> <worktree>
 
 Examples:
   workroot new my-app my-feature
+  workroot new -o json my-app my-feature
 
 If the repo is not known yet, first run:
   workroot discover
@@ -117,10 +121,11 @@ Examples:
 If a managed session already exists, Workroot attaches instead of replacing it."#;
 
 const PUSH_HELP: &str = r#"Command shape:
-  workroot push <project> <worktree>
+  workroot push [-o json] <project> <worktree>
 
 Examples:
   workroot push my-app my-feature
+  workroot push -o json my-app my-feature
 
 If the branch has no upstream, Workroot pushes with `-u origin <branch>`. Otherwise it runs a normal `git push`."#;
 
@@ -175,7 +180,7 @@ pub enum Commands {
     },
     #[command(
         about = "Show the global worktree and process radar",
-        override_usage = "workroot status [--json] [--refresh] [<project> [<worktree>]]",
+        override_usage = "workroot status [-o json|--json] [--refresh] [<project> [<worktree>]]",
         after_help = STATUS_HELP
     )]
     Status {
@@ -183,6 +188,14 @@ pub enum Commands {
         refresh: bool,
         #[arg(long, help = "Print stable machine-readable JSON")]
         json: bool,
+        #[arg(
+            short = 'o',
+            long = "output",
+            value_enum,
+            value_name = "FORMAT",
+            help = "Select stdout format"
+        )]
+        output: Option<OutputFormat>,
         #[arg(
             value_name = "PROJECT",
             help = "Project name, repo alias, or display name to filter"
@@ -200,10 +213,18 @@ pub enum Commands {
     Sessions,
     #[command(
         about = "Push a target branch to its remote",
-        override_usage = "workroot push <project> <worktree>",
+        override_usage = "workroot push [-o json] <project> <worktree>",
         after_help = PUSH_HELP
     )]
     Push {
+        #[arg(
+            short = 'o',
+            long = "output",
+            value_enum,
+            value_name = "FORMAT",
+            help = "Select stdout format"
+        )]
+        output: Option<OutputFormat>,
         #[arg(
             value_name = "PROJECT",
             help = "Project name, repo alias, or display name"
@@ -231,10 +252,18 @@ pub enum Commands {
     },
     #[command(
         about = "Print a worktree path for scripts",
-        override_usage = "workroot path <project> [<worktree>]",
+        override_usage = "workroot path [-o json] <project> [<worktree>]",
         after_help = PATH_HELP
     )]
     Path {
+        #[arg(
+            short = 'o',
+            long = "output",
+            value_enum,
+            value_name = "FORMAT",
+            help = "Select stdout format"
+        )]
+        output: Option<OutputFormat>,
         #[arg(
             value_name = "PROJECT",
             help = "Project name, repo alias, or display name"
@@ -259,10 +288,18 @@ pub enum Commands {
     },
     #[command(
         about = "Create a new worktree target",
-        override_usage = "workroot new <project> <worktree>",
+        override_usage = "workroot new [-o json] <project> <worktree>",
         after_help = NEW_HELP
     )]
     New {
+        #[arg(
+            short = 'o',
+            long = "output",
+            value_enum,
+            value_name = "FORMAT",
+            help = "Select stdout format"
+        )]
+        output: Option<OutputFormat>,
         #[arg(
             value_name = "PROJECT",
             help = "Project name, repo alias, or display name"
@@ -431,6 +468,12 @@ pub enum CompleteKind {
     Targets,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum OutputFormat {
+    Text,
+    Json,
+}
+
 pub fn run(cli: Cli) -> AppResult<Option<String>> {
     let storage = FileStorage::for_user()?;
     match cli.command {
@@ -457,17 +500,19 @@ pub fn run(cli: Cli) -> AppResult<Option<String>> {
         Commands::Status {
             refresh,
             json,
+            output,
             repo,
             target,
         } => {
-            if json && refresh {
+            let output = status_output_format(json, output)?;
+            if output == OutputFormat::Json && refresh {
                 Ok(Some(radar_json_with_refresh(
                     &storage,
                     &Git::default(),
                     repo.as_deref(),
                     target.as_deref(),
                 )?))
-            } else if json {
+            } else if output == OutputFormat::Json {
                 Ok(Some(radar_json_with_storage(
                     &storage,
                     repo.as_deref(),
@@ -489,22 +534,35 @@ pub fn run(cli: Cli) -> AppResult<Option<String>> {
             }
         }
         Commands::Audit => run_worktree(&storage, WorktreeCommand::Audit),
-        Commands::Push { repo, target } => {
-            run_worktree(&storage, WorktreeCommand::Push { repo, target })
-        }
+        Commands::Push {
+            output,
+            repo,
+            target,
+        } => push_output(&storage, output_or_text(output), &repo, &target).map(Some),
         Commands::Prune { repo, target } => {
             run_worktree(&storage, WorktreeCommand::Prune { repo, target })
         }
         Commands::Sessions => run_tmux(&storage, TmuxCommand::List),
-        Commands::Path { repo, target } => {
-            run_worktree(&storage, WorktreeCommand::Path { repo, target })
-        }
+        Commands::Path {
+            output,
+            repo,
+            target,
+        } => path_output(
+            &storage,
+            output_or_text(output),
+            "path",
+            &repo,
+            target.as_deref(),
+        )
+        .map(Some),
         Commands::Cd { repo, target } => {
             run_worktree(&storage, WorktreeCommand::Cd { repo, target })
         }
-        Commands::New { repo, target } => {
-            run_worktree(&storage, WorktreeCommand::New { repo, target })
-        }
+        Commands::New {
+            output,
+            repo,
+            target,
+        } => new_worktree_output(&storage, output_or_text(output), &repo, &target).map(Some),
         Commands::Discover { path } => {
             discovery::discover(&storage, &Git::default(), path.as_deref()).map(Some)
         }
@@ -534,6 +592,141 @@ pub fn run(cli: Cli) -> AppResult<Option<String>> {
             run_tmux(&storage, TmuxCommand::Attach { repo, target })
         }
     }
+}
+
+fn output_or_text(output: Option<OutputFormat>) -> OutputFormat {
+    output.unwrap_or(OutputFormat::Text)
+}
+
+fn status_output_format(json: bool, output: Option<OutputFormat>) -> AppResult<OutputFormat> {
+    match (json, output) {
+        (true, Some(OutputFormat::Text)) => Err(AppError::InvalidCommand(
+            "pass either `--json` or `--output json`; `--json --output text` is contradictory"
+                .to_string(),
+        )),
+        (true, _) => Ok(OutputFormat::Json),
+        (false, Some(output)) => Ok(output),
+        (false, None) => Ok(OutputFormat::Text),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct WorktreeJson {
+    schema_version: u32,
+    command: &'static str,
+    repo: String,
+    target: String,
+    display_name: String,
+    branch: Option<String>,
+    detached: bool,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PushJson {
+    schema_version: u32,
+    command: &'static str,
+    repo: String,
+    target: String,
+    branch: String,
+    upstream: String,
+    upstream_set: bool,
+    path: String,
+}
+
+fn json_output<T: Serialize>(kind: &'static str, value: &T) -> AppResult<String> {
+    serde_json::to_string_pretty(value)
+        .map(|json| format!("{json}\n"))
+        .map_err(|source| AppError::SerializeJson {
+            kind,
+            source: Box::new(source),
+        })
+}
+
+fn path_output(
+    storage: &FileStorage,
+    output: OutputFormat,
+    command: &'static str,
+    repo: &str,
+    target: Option<&str>,
+) -> AppResult<String> {
+    let resolved = Resolver::new(storage.load_cache()?).resolve_worktree(repo, target)?;
+    match output {
+        OutputFormat::Text => Ok(format!("{}\n", resolved.path.display())),
+        OutputFormat::Json => render_worktree_json(command, &resolved),
+    }
+}
+
+fn new_worktree_output(
+    storage: &FileStorage,
+    output: OutputFormat,
+    repo: &str,
+    target: &str,
+) -> AppResult<String> {
+    match output {
+        OutputFormat::Text => discovery::new_worktree(storage, &Git::default(), repo, target),
+        OutputFormat::Json => {
+            let path = discovery::new_worktree(storage, &Git::default(), repo, target)?
+                .trim_end_matches('\n')
+                .to_string();
+            let resolved =
+                Resolver::new(storage.load_cache()?).resolve_worktree(repo, Some(target))?;
+            render_worktree_json_with_path("new", &resolved, path)
+        }
+    }
+}
+
+fn push_output(
+    storage: &FileStorage,
+    output: OutputFormat,
+    repo: &str,
+    target: &str,
+) -> AppResult<String> {
+    let outcome = crate::push::push_worktree_outcome(storage, &Git::default(), repo, target)?;
+    match output {
+        OutputFormat::Text => Ok(outcome.message()),
+        OutputFormat::Json => render_push_json(&outcome),
+    }
+}
+
+fn render_worktree_json(command: &'static str, resolved: &ResolvedWorktree) -> AppResult<String> {
+    render_worktree_json_with_path(command, resolved, resolved.path.display().to_string())
+}
+
+fn render_worktree_json_with_path(
+    command: &'static str,
+    resolved: &ResolvedWorktree,
+    path: String,
+) -> AppResult<String> {
+    json_output(
+        "worktree JSON",
+        &WorktreeJson {
+            schema_version: 1,
+            command,
+            repo: resolved.repo.alias.clone(),
+            target: resolved.worktree.target.clone(),
+            display_name: resolved.worktree.display_name.clone(),
+            branch: resolved.worktree.branch.clone(),
+            detached: resolved.worktree.detached,
+            path,
+        },
+    )
+}
+
+fn render_push_json(outcome: &PushOutcome) -> AppResult<String> {
+    json_output(
+        "push JSON",
+        &PushJson {
+            schema_version: 1,
+            command: "push",
+            repo: outcome.repo.clone(),
+            target: outcome.target.clone(),
+            branch: outcome.branch.clone(),
+            upstream: outcome.upstream.clone(),
+            upstream_set: outcome.upstream_set,
+            path: outcome.path.display().to_string(),
+        },
+    )
 }
 
 fn run_worktree(storage: &FileStorage, command: WorktreeCommand) -> AppResult<Option<String>> {

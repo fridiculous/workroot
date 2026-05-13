@@ -1,7 +1,32 @@
+use std::path::PathBuf;
+
 use crate::error::{AppError, AppResult};
 use crate::git::Git;
 use crate::resolver::Resolver;
 use crate::storage::FileStorage;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushOutcome {
+    pub repo: String,
+    pub target: String,
+    pub branch: String,
+    pub upstream: String,
+    pub upstream_set: bool,
+    pub path: PathBuf,
+}
+
+impl PushOutcome {
+    pub fn message(&self) -> String {
+        if self.upstream_set {
+            format!(
+                "pushed `{}` to `{}` and set upstream\n",
+                self.branch, self.upstream
+            )
+        } else {
+            format!("pushed `{}` to `{}`\n", self.branch, self.upstream)
+        }
+    }
+}
 
 pub fn push_worktree(
     storage: &FileStorage,
@@ -9,6 +34,15 @@ pub fn push_worktree(
     repo: &str,
     target: &str,
 ) -> AppResult<String> {
+    push_worktree_outcome(storage, git, repo, target).map(|outcome| outcome.message())
+}
+
+pub fn push_worktree_outcome(
+    storage: &FileStorage,
+    git: &Git,
+    repo: &str,
+    target: &str,
+) -> AppResult<PushOutcome> {
     let resolved = Resolver::new(storage.load_cache()?).resolve_worktree(repo, Some(target))?;
 
     if resolved.worktree.detached {
@@ -49,13 +83,25 @@ pub fn push_worktree(
     match upstream {
         Some(upstream) => {
             git.push(&resolved.path)?;
-            Ok(format!("pushed `{branch}` to `{upstream}`\n"))
+            Ok(PushOutcome {
+                repo: resolved.repo.alias,
+                target: resolved.worktree.target,
+                branch,
+                upstream,
+                upstream_set: false,
+                path: resolved.path,
+            })
         }
         None => {
             git.push_with_upstream(&resolved.path, "origin", &branch)?;
-            Ok(format!(
-                "pushed `{branch}` to `origin/{branch}` and set upstream\n"
-            ))
+            Ok(PushOutcome {
+                repo: resolved.repo.alias,
+                target: resolved.worktree.target,
+                upstream: format!("origin/{branch}"),
+                branch,
+                upstream_set: true,
+                path: resolved.path,
+            })
         }
     }
 }

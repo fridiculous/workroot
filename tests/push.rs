@@ -5,7 +5,7 @@ use std::process::Command;
 use workroot::discovery;
 use workroot::domain::Config;
 use workroot::git::Git;
-use workroot::push::push_worktree;
+use workroot::push::{push_worktree, push_worktree_outcome};
 use workroot::storage::{FileStorage, StoragePaths};
 
 fn storage(root: &Path) -> FileStorage {
@@ -179,6 +179,47 @@ fn push_sets_upstream_on_first_push() {
         ],
         &repo
     ));
+}
+
+#[test]
+fn push_outcome_exposes_json_ready_fields() {
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("origin.git");
+    let seed = temp.path().join("seed");
+    let repo = temp.path().join("repo");
+    let root = temp.path().join("managed");
+
+    init_bare_repo(&remote, "main");
+    init_repo(&seed, "main");
+    let remote_arg = remote.display().to_string();
+    git(&["remote", "add", "origin", &remote_arg], &seed);
+    git(&["push", "-u", "origin", "main"], &seed);
+    clone_repo(&remote, &repo);
+
+    let storage = storage(&temp.path().join("state"));
+    storage
+        .save_config(&Config {
+            default_worktree_root: Some(root.clone()),
+            ..Config::default()
+        })
+        .unwrap();
+    discovery::adopt(&storage, &Git::default(), &repo).unwrap();
+    let feature_path = root.join("repo").join("feature");
+    discovery::new_worktree(&storage, &Git::default(), "repo", "feature").unwrap();
+    commit_file(&feature_path, "feature.txt", "feature commit");
+
+    let outcome = push_worktree_outcome(&storage, &Git::default(), "repo", "feature").unwrap();
+
+    assert_eq!(outcome.repo, "repo");
+    assert_eq!(outcome.target, "feature");
+    assert_eq!(outcome.branch, "feature");
+    assert_eq!(outcome.upstream, "origin/feature");
+    assert!(outcome.upstream_set);
+    assert_eq!(outcome.path, fs::canonicalize(&feature_path).unwrap());
+    assert_eq!(
+        outcome.message(),
+        "pushed `feature` to `origin/feature` and set upstream\n"
+    );
 }
 
 #[test]

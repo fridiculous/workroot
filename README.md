@@ -61,12 +61,12 @@ A target is one unit of work: one branch, one worktree path, one status row, and
 | Need | Command |
 | --- | --- |
 | Index repos | `workroot discover [path]` |
-| See known worktrees | `workroot status [repo] [target]` |
-| Create a target worktree | `workroot new <repo> <target>` |
-| Print a target path | `workroot path <repo> [target]` |
+| See known worktrees | `workroot status [-o json] [repo] [target]` |
+| Create a target worktree | `workroot new [-o json] <repo> <target>` |
+| Print a target path | `workroot path [-o json] <repo> [target]` |
 | Change directory through shell integration | `workroot cd <repo> [target]` |
 | Run a command in a target | `workroot run <repo> <target> -- <cmd...>` |
-| Push a target branch | `workroot push <repo> <target>` |
+| Push a target branch | `workroot push [-o json] <repo> <target>` |
 | Remove merged targets safely | `workroot prune [repo] [target]` |
 | Install shell integration | `workroot shell-init <shell>` |
 
@@ -106,6 +106,17 @@ cd "$(workroot new workroot docs)"
 ```
 
 `workroot path` and direct `workroot new` print path-only stdout.
+
+For scripts that want structured output, use `-o json` or `--output json`:
+
+```bash
+workroot status -o json
+workroot path -o json workroot public-launch | jq -r .path
+workroot new -o json workroot docs | jq -r .path
+workroot push -o json workroot docs
+```
+
+`workroot status --json` remains supported as a compatibility alias for `workroot status -o json`.
 
 ## Scope
 
