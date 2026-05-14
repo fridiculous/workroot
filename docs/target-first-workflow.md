@@ -26,6 +26,7 @@ workroot discover /path/to/repo
 workroot status
 workroot status <repo>
 workroot status <repo> <target>
+workroot status -o json <repo> <target>
 ```
 
 2. Spawn a target from the repo base branch
@@ -33,6 +34,7 @@ workroot status <repo> <target>
 ```bash
 workroot new <repo> <target>
 cd "$(workroot new <repo> <target>)"
+workroot new -o json <repo> <target>
 ```
 
 `workroot new` prints the created path to stdout so it composes with shell command substitution.
@@ -42,6 +44,7 @@ cd "$(workroot new <repo> <target>)"
 ```bash
 workroot path <repo> <target>
 cd "$(workroot path <repo> <target>)"
+workroot path -o json <repo> <target>
 ```
 
 If shell integration is installed, you can also use:
@@ -62,6 +65,7 @@ Use this when you want Workroot to manage the tmux session identity for a target
 
 ```bash
 workroot push <repo> <target>
+workroot push -o json <repo> <target>
 ```
 
 Workroot pushes with `git push -u origin <branch>` on first push, then uses normal `git push` once upstream exists.
@@ -100,12 +104,28 @@ cd "$(workroot path <repo> <target>)"
 cd "$(workroot new <repo> <target>)"
 ```
 
+JSON stdout:
+
+```bash
+workroot status -o json [repo] [target]
+workroot path -o json <repo> <target>
+workroot new -o json <repo> <target>
+workroot push -o json <repo> <target>
+```
+
+This enables tool-native composition:
+
+```bash
+workroot path -o json <repo> <target> | jq -r .path
+workroot new -o json <repo> <target> | jq -r .path
+```
+
+`workroot status --json` remains supported as a compatibility alias for `workroot status -o json`.
+
 Human-oriented commands:
 
 ```bash
-workroot status
 workroot run <repo> <target> -- <cmd...>
-workroot push <repo> <target>
 workroot prune [repo] [target]
 ```
 

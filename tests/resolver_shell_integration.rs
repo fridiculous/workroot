@@ -28,6 +28,29 @@ fn path_prints_path_only_to_stdout() {
 }
 
 #[test]
+fn path_can_print_json_for_chaining() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree_path = temp.path().join("work tree $special [x]");
+    fs::create_dir_all(&worktree_path).unwrap();
+    write_cache(temp.path(), cache_with_worktrees(&worktree_path, &[]));
+
+    let output = workroot_command(temp.path())
+        .args(["path", "-o", "json", "jam", "auth"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(stderr(&output), "");
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["command"], "path");
+    assert_eq!(json["repo"], "jam");
+    assert_eq!(json["target"], "auth");
+    assert_eq!(json["branch"], "auth");
+    assert_eq!(json["path"], worktree_path.display().to_string());
+}
+
+#[test]
 fn path_fails_ambiguity_without_tty_and_keeps_stdout_empty() {
     let temp = tempfile::tempdir().unwrap();
     let base_path = temp.path().join("base");
@@ -97,6 +120,27 @@ fn status_json_can_filter_to_one_target() {
     assert_eq!(json["idle"][0]["target"], "auth");
     assert_eq!(json["idle"][0]["path"], auth_path.display().to_string());
     assert!(!stdout(&output).contains(&docs_path.display().to_string()));
+}
+
+#[test]
+fn status_output_json_matches_legacy_json_flag() {
+    let temp = tempfile::tempdir().unwrap();
+    let auth_path = temp.path().join("auth");
+    fs::create_dir_all(&auth_path).unwrap();
+    write_cache(temp.path(), cache_with_worktrees(&auth_path, &[]));
+
+    let output = workroot_command(temp.path())
+        .args(["status", "-o", "json", "jam", "auth"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["summary"]["worktrees"], 1);
+    assert_eq!(json["idle"][0]["repo"], "jam");
+    assert_eq!(json["idle"][0]["target"], "auth");
+    assert_eq!(json["idle"][0]["path"], auth_path.display().to_string());
 }
 
 #[test]
@@ -251,6 +295,36 @@ fn top_level_new_prints_path_when_not_interactive() {
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(stdout(&output), format!("{}\n", expected.display()));
+    assert!(expected.join(".git").exists());
+}
+
+#[test]
+fn top_level_new_can_print_json_for_chaining() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_git_repo(&repo);
+    let adopt = workroot_command(temp.path())
+        .args(["worktree", "adopt"])
+        .arg(&repo)
+        .output()
+        .unwrap();
+    assert!(adopt.status.success(), "stderr: {}", stderr(&adopt));
+
+    let output = workroot_command(temp.path())
+        .args(["new", "-o", "json", "repo", "feature"])
+        .output()
+        .unwrap();
+    let expected = temp.path().join(".worktrees").join("repo").join("feature");
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(stderr(&output), "");
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["command"], "new");
+    assert_eq!(json["repo"], "repo");
+    assert_eq!(json["target"], "feature");
+    assert_eq!(json["branch"], "feature");
+    assert_eq!(json["path"], expected.display().to_string());
     assert!(expected.join(".git").exists());
 }
 

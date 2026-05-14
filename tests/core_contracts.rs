@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use clap::{CommandFactory, Parser};
-use workroot::cli::{Cli, Commands, TmuxCommand, WorktreeCommand};
+use workroot::cli::{Cli, Commands, OutputFormat, TmuxCommand, WorktreeCommand};
 use workroot::domain::{
     CURRENT_SCHEMA_VERSION, Cache, DirtyState, RepoRecord, RepoSource, State, WorktreeRecord,
     WorktreeSource,
@@ -38,7 +38,7 @@ fn workroot_binary_help_uses_workroot() {
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();
     assert!(help.contains("Usage: workroot <COMMAND>"));
-    assert!(help.contains("workroot new <project> <worktree>"));
+    assert!(help.contains("workroot new [-o json] <project> <worktree>"));
 }
 
 #[test]
@@ -182,11 +182,11 @@ fn public_top_level_commands_parse_and_appear_in_help() {
     assert!(help.contains("workroot new my-app my-feature"));
     assert!(help.contains("GitHub: https://github.com/fridiculous/workroot"));
     assert!(help.contains("new          Create a target worktree from the repo base branch"));
-    assert!(help.contains("workroot new <project> <worktree>"));
+    assert!(help.contains("workroot new [-o json] <project> <worktree>"));
     assert!(help.contains("push         Push a target branch to its remote"));
-    assert!(help.contains("workroot push <project> <worktree>"));
+    assert!(help.contains("workroot push [-o json] <project> <worktree>"));
     assert!(help.contains("status       Show worktrees; --json for scripts"));
-    assert!(help.contains("workroot status [--json] [--refresh] [<project> [<worktree>]]"));
+    assert!(help.contains("workroot status [-o json|--json] [--refresh] [<project> [<worktree>]]"));
     assert!(
         help.contains("discover     Index repos from configured roots or from one explicit path")
     );
@@ -270,12 +270,42 @@ fn public_top_level_commands_parse_and_appear_in_help() {
             .command,
         Commands::Path { .. }
     ));
+    match Cli::try_parse_from(["workroot", "path", "-o", "json", "jam", "auth"])
+        .unwrap()
+        .command
+    {
+        Commands::Path {
+            output,
+            repo,
+            target,
+        } => {
+            assert_eq!(output, Some(OutputFormat::Json));
+            assert_eq!(repo, "jam");
+            assert_eq!(target.as_deref(), Some("auth"));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
     assert!(matches!(
         Cli::try_parse_from(["workroot", "new", "jam", "feature"])
             .unwrap()
             .command,
         Commands::New { .. }
     ));
+    match Cli::try_parse_from(["workroot", "new", "--output", "json", "jam", "feature"])
+        .unwrap()
+        .command
+    {
+        Commands::New {
+            output,
+            repo,
+            target,
+        } => {
+            assert_eq!(output, Some(OutputFormat::Json));
+            assert_eq!(repo, "jam");
+            assert_eq!(target, "feature");
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
     assert!(matches!(
         Cli::try_parse_from(["workroot", "run", "jam", "auth", "--", "runner"])
             .unwrap()
@@ -288,6 +318,21 @@ fn public_top_level_commands_parse_and_appear_in_help() {
             .command,
         Commands::Push { .. }
     ));
+    match Cli::try_parse_from(["workroot", "push", "-o", "json", "jam", "auth"])
+        .unwrap()
+        .command
+    {
+        Commands::Push {
+            output,
+            repo,
+            target,
+        } => {
+            assert_eq!(output, Some(OutputFormat::Json));
+            assert_eq!(repo, "jam");
+            assert_eq!(target, "auth");
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
     assert!(matches!(
         Cli::try_parse_from(["workroot", "prune", "jam", "auth"])
             .unwrap()
@@ -333,7 +378,10 @@ fn command_help_teaches_examples_and_json() {
         .render_help()
         .to_string();
     assert!(status_help.contains("--json"));
-    assert!(status_help.contains("workroot status [--json] [--refresh] <project> <worktree>"));
+    assert!(status_help.contains("--output <FORMAT>"));
+    assert!(
+        status_help.contains("workroot status [-o json|--json] [--refresh] <project> <worktree>")
+    );
 
     let run_help = command
         .find_subcommand_mut("run")
@@ -347,7 +395,7 @@ fn command_help_teaches_examples_and_json() {
         .unwrap()
         .render_help()
         .to_string();
-    assert!(push_help.contains("workroot push <project> <worktree>"));
+    assert!(push_help.contains("workroot push [-o json] <project> <worktree>"));
 }
 
 #[test]
