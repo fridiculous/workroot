@@ -49,6 +49,17 @@ For behavior changes:
 
 ## Pull requests
 
+Use Conventional Commits for:
+- the first commit on the branch
+- the PR title
+
+This keeps the squash-merge commit title predictable.
+
+Examples:
+- `feat: add worktree ignore command`
+- `fix: keep path output stdout-only`
+- `docs: clarify shell integration setup`
+
 Before opening a PR:
 
 ```bash
@@ -60,6 +71,7 @@ cargo test
 A good PR includes:
 - a clear problem statement
 - the intended user-facing behavior
+- a Conventional Commit PR title
 - tests for changed behavior
 - docs/help updates if the public contract changed
 

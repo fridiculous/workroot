@@ -21,6 +21,7 @@ user
 
 - keep the public CLI small and teachable
 - preserve path-only stdout for navigation-oriented commands
+- expose JSON only as an explicit opt-in output format
 - store machine-wide config, state, and cache outside individual repos
 - use Git as the source of truth for worktree reality
 - treat destructive cleanup conservatively
@@ -71,13 +72,14 @@ Legacy pre-rename env vars are still supported as migration fallbacks.
 - choose/create the branch
 - create the worktree under the configured root
 - refresh cached discovery
-- return the new path for shell integration
+- return the new path for shell integration, or structured worktree JSON with `-o json`
 
 `workroot push <repo> <target>`:
 - resolve the worktree
 - verify the branch is safe to push
 - push with `-u origin <branch>` on first push
 - use normal `git push` once upstream exists
+- return a human message by default, or structured push JSON with `-o json`
 
 `workroot prune [repo] [target]`:
 - collect candidate worktrees
