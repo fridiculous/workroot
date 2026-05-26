@@ -20,7 +20,7 @@ Install Workroot:
 curl -fsSL https://raw.githubusercontent.com/fridiculous/workroot/main/install.sh | bash
 ```
 
-Discover a repo, inspect status, and create a target:
+Discover a repo, inspect status, and create a detached target:
 
 ```bash
 workroot discover /path/to/repo
@@ -40,6 +40,7 @@ workroot discover ~/projects/workroot
 workroot status
 cd "$(workroot new workroot public-launch)"
 workroot run workroot public-launch -- cargo test
+workroot switch workroot public-launch -c feat/public-launch
 workroot push workroot public-launch
 # After the branch is merged:
 workroot prune workroot public-launch
@@ -49,12 +50,13 @@ workroot prune workroot public-launch
 
 1. Discover a repo once.
 2. Check your machine-wide worktree status.
-3. Create or enter a named target worktree.
+3. Create or enter a named target worktree. New targets are detached by default.
 4. Run commands in that target.
-5. Push the target branch.
-6. Prune it after Workroot proves it was merged.
+5. Create a branch when the work is worth reviewing, or merge it into an existing branch worktree.
+6. Push the target branch when using the review path.
+7. Prune it after Workroot proves it was merged.
 
-A target is one unit of work: one branch, one worktree path, one status row, and one optional managed session.
+A target is one unit of work: one worktree path, one status row, and one optional managed session. It may be detached or attached to a branch.
 
 ## Command map
 
@@ -62,11 +64,16 @@ A target is one unit of work: one branch, one worktree path, one status row, and
 | --- | --- |
 | Index repos | `workroot discover [path]` |
 | See known worktrees | `workroot status [repo] [target]` |
-| Create a target worktree | `workroot new <repo> <target>` |
+| Create a detached target worktree | `workroot new <repo> <target>` |
+| Create an attached branch worktree | `workroot new <repo> <target> --branch [branch]` |
+| Switch a detached target to a branch | `workroot switch <repo> <target> -c <branch>` |
+| Merge a target into a branch worktree | `workroot merge <repo> <target> --into <branch>` |
+| Detach a branch-backed target | `workroot detach <repo> <target>` |
 | Print a target path | `workroot path <repo> [target]` |
 | Change directory through shell integration | `workroot cd <repo> [target]` |
 | Run a command in a target | `workroot run <repo> <target> -- <cmd...>` |
 | Push a target branch | `workroot push <repo> <target>` |
+| Create a GitHub PR | `workroot pr <repo> <target>` |
 | Remove merged targets safely | `workroot prune [repo] [target]` |
 | Install shell integration | `workroot shell-init <shell>` |
 

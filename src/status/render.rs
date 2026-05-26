@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::IsTerminal;
 
-use crate::domain::{Cache, RepoRecord};
+use crate::domain::{Cache, RepoRecord, WorktreeRecord};
 
 use super::{
-    LiveWorktreeStatus, RadarState, RadarSummary, RadarTmuxRow, RadarView, RadarWorktreeRow,
-    base_branch_label, branch_label, radar_state_label, sorted_worktrees, status_dirty_label,
+    BranchDisplay, LiveWorktreeStatus, RadarState, RadarSummary, RadarTmuxRow, RadarView,
+    RadarWorktreeRow, base_branch_label, radar_state_label, sorted_worktrees, status_dirty_label,
     status_head_label, worktree_key,
 };
 
@@ -35,48 +35,171 @@ pub(super) fn render_status(
         .iter()
         .map(|repo| (repo.alias.as_str(), repo))
         .collect::<HashMap<_, _>>();
-    let mut rows = Vec::new();
-    rows.push(vec![
-        "REPO".to_string(),
-        "BASE BRANCH".to_string(),
-        "WORKTREE BRANCH".to_string(),
-        "HEAD".to_string(),
-        "DIRTY".to_string(),
-        "PATH".to_string(),
-    ]);
-
+    let mut by_repo = BTreeMap::<String, Vec<&WorktreeRecord>>::new();
     for worktree in sorted_worktrees(cache) {
-        let status = statuses
-            .get(&worktree_key(worktree))
-            .expect("status exists for every sorted worktree");
-        let repo: Option<&RepoRecord> = repos_by_alias.get(worktree.repo_alias.as_str()).copied();
-        rows.push(vec![
-            worktree.repo_alias.clone(),
-            base_branch_label(repo),
-            branch_label(&status.branch),
-            status_head_label(status),
-            status_dirty_label(status),
-            worktree.path.display().to_string(),
-        ]);
+        by_repo
+            .entry(worktree.repo_alias.clone())
+            .or_default()
+            .push(worktree);
     }
 
-    render_table(rows)
+    let mut output = String::new();
+    for (repo_alias, worktrees) in by_repo {
+        let repo: Option<&RepoRecord> = repos_by_alias.get(repo_alias.as_str()).copied();
+        output.push_str(&format!("repo {repo_alias}\n"));
+        output.push_str(&format!("  base {}\n", base_line(repo, "unknown")));
+        for worktree in worktrees {
+            let status = statuses
+                .get(&worktree_key(worktree))
+                .expect("status exists for every sorted worktree");
+            output.push_str(&render_worktree_tree(
+                worktree, status, "none", "-", "unknown",
+            ));
+        }
+    }
+
+    output
 }
 
 pub(super) fn render_radar_view(view: &RadarView) -> String {
-    let colors = color_enabled();
     let mut output = String::new();
     output.push_str(&render_summary(&view.summary));
     output.push('\n');
     output.push('\n');
-    render_worktree_section(&mut output, "ATTENTION", &view.attention, colors);
+
+    let mut rows = view
+        .attention
+        .iter()
+        .chain(view.active.iter())
+        .chain(view.idle.iter())
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        left.repo
+            .cmp(&right.repo)
+            .then_with(|| left.target.cmp(&right.target))
+    });
+    let mut by_repo = BTreeMap::<String, Vec<&RadarWorktreeRow>>::new();
+    for row in rows {
+        by_repo.entry(row.repo.clone()).or_default().push(row);
+    }
+
+    for (repo, rows) in by_repo {
+        output.push_str(&format!("repo {repo}\n"));
+        if let Some(first) = rows.first() {
+            output.push_str(&format!(
+                "  base {} @ {}\n",
+                first.base_branch, first.base_head
+            ));
+        }
+        for row in rows {
+            output.push_str(&render_radar_worktree_tree(row));
+        }
+    }
+
     output.push('\n');
-    render_worktree_section(&mut output, "ACTIVE PROCESSES", &view.active, colors);
-    output.push('\n');
-    render_worktree_section(&mut output, "IDLE WORKTREES", &view.idle, colors);
-    output.push('\n');
-    render_tmux_section(&mut output, "UNMAPPED TMUX", &view.unmapped, colors);
+    render_tmux_section(
+        &mut output,
+        "UNMAPPED TMUX",
+        &view.unmapped,
+        color_enabled(),
+    );
     output
+}
+
+fn base_line(repo: Option<&RepoRecord>, head: &str) -> String {
+    format!("{} @ {head}", base_branch_label(repo))
+}
+
+fn render_worktree_tree(
+    worktree: &WorktreeRecord,
+    status: &LiveWorktreeStatus,
+    session: &str,
+    command: &str,
+    upstream: &str,
+) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("  worktree {}\n", worktree.target));
+    output.push_str(&format!("    path {}\n", worktree.path.display()));
+    output.push_str(&format!("    {}\n", head_line(status)));
+    if matches!(status.branch, BranchDisplay::Named(_)) {
+        output.push_str("    branch locked here\n");
+        output.push_str(&format!("    upstream {upstream}\n"));
+    } else if status.unbranched_commits {
+        output.push_str("    unbranched commits\n");
+    }
+    output.push_str(&format!("    state {}\n", status_dirty_label(status)));
+    output.push_str(&format!("    session {session}\n"));
+    if command != "-" {
+        output.push_str(&format!("    command {command}\n"));
+    }
+    output
+}
+
+fn render_radar_worktree_tree(row: &RadarWorktreeRow) -> String {
+    let status = LiveWorktreeStatus {
+        branch: if row.branch == "detached" {
+            BranchDisplay::Detached
+        } else if row.branch == "unknown" {
+            BranchDisplay::Unknown
+        } else {
+            BranchDisplay::Named(row.branch.clone())
+        },
+        head: Some(row.head.clone()).filter(|head| head != "unknown" && head != "stale"),
+        upstream: Some(row.upstream.clone()).filter(|upstream| upstream != "none"),
+        unbranched_commits: row.unbranched_commits,
+        dirty: dirty_from_label(&row.dirty),
+        stale: row.dirty == "stale",
+    };
+    let session = if row.session == "-" {
+        "none"
+    } else {
+        row.session.as_str()
+    };
+    let upstream = if row.upstream == "none" {
+        "none (unpushed)"
+    } else {
+        row.upstream.as_str()
+    };
+    let worktree = WorktreeRecord {
+        repo_alias: row.repo.clone(),
+        target: row.target.clone(),
+        display_name: row.target.clone(),
+        branch: match &status.branch {
+            BranchDisplay::Named(branch) => Some(branch.clone()),
+            _ => None,
+        },
+        path: row.path.clone().into(),
+        source: crate::domain::WorktreeSource::Unknown,
+        dirty: crate::domain::DirtyState::Unknown,
+        last_seen_unix: None,
+        stale: status.stale,
+        detached: matches!(status.branch, BranchDisplay::Detached),
+    };
+    render_worktree_tree(&worktree, &status, session, &row.command, upstream)
+}
+
+fn dirty_from_label(label: &str) -> crate::domain::DirtyState {
+    if label == "clean" {
+        crate::domain::DirtyState::Clean
+    } else if let Some(files) = label
+        .strip_prefix("dirty(")
+        .and_then(|value| value.strip_suffix(')'))
+        .and_then(|value| value.parse::<u32>().ok())
+    {
+        crate::domain::DirtyState::Dirty { files }
+    } else {
+        crate::domain::DirtyState::Unknown
+    }
+}
+
+fn head_line(status: &LiveWorktreeStatus) -> String {
+    match &status.branch {
+        BranchDisplay::Named(branch) => {
+            format!("head -> branch {branch} @ {}", status_head_label(status))
+        }
+        BranchDisplay::Detached => format!("head detached @ {}", status_head_label(status)),
+        BranchDisplay::Unknown => format!("head unknown @ {}", status_head_label(status)),
+    }
 }
 
 fn render_summary(summary: &RadarSummary) -> String {
@@ -96,51 +219,6 @@ fn render_summary(summary: &RadarSummary) -> String {
         summary.dirty,
         summary.stale
     )
-}
-
-fn render_worktree_section(
-    output: &mut String,
-    title: &str,
-    rows: &[RadarWorktreeRow],
-    colors: bool,
-) {
-    output.push_str(title);
-    output.push('\n');
-    if rows.is_empty() {
-        output.push_str("  none\n");
-        return;
-    }
-
-    output.push_str(&render_styled_table(
-        std::iter::once(vec![
-            plain_cell("STATE"),
-            plain_cell("REPO"),
-            plain_cell("TARGET"),
-            plain_cell("BASE"),
-            plain_cell("BRANCH"),
-            plain_cell("HEAD"),
-            plain_cell("DIRTY"),
-            plain_cell("SESSION"),
-            plain_cell("COMMAND"),
-            plain_cell("PATH"),
-        ])
-        .chain(rows.iter().map(|row| {
-            vec![
-                state_cell(row.state),
-                plain_cell(&row.repo),
-                plain_cell(&row.target),
-                plain_cell(&row.base_branch),
-                plain_cell(&row.branch),
-                plain_cell(&row.head),
-                plain_cell(&row.dirty),
-                plain_cell(&row.session),
-                plain_cell(&row.command),
-                plain_cell(&row.path),
-            ]
-        }))
-        .collect(),
-        colors,
-    ));
 }
 
 fn render_tmux_section(output: &mut String, title: &str, rows: &[RadarTmuxRow], colors: bool) {

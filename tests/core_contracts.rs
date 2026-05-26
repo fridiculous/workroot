@@ -181,10 +181,20 @@ fn public_top_level_commands_parse_and_appear_in_help() {
     assert!(help.contains("workroot discover ~/projects/my-app"));
     assert!(help.contains("workroot new my-app my-feature"));
     assert!(help.contains("GitHub: https://github.com/fridiculous/workroot"));
-    assert!(help.contains("new          Create a target worktree from the repo base branch"));
-    assert!(help.contains("workroot new <project> <worktree>"));
+    assert!(
+        help.contains("new          Create a detached target worktree from the repo base branch")
+    );
+    assert!(help.contains("workroot new <project> <worktree> [--branch [<branch>]]"));
+    assert!(help.contains("switch       Switch a target worktree, creating a branch with -c"));
+    assert!(help.contains("workroot switch <project> <worktree> -c <branch>"));
+    assert!(help.contains("merge        Merge a target HEAD into an existing branch worktree"));
+    assert!(help.contains("workroot merge <project> <worktree> --into <branch>"));
+    assert!(help.contains("detach       Detach a branch-backed target at its current HEAD"));
+    assert!(help.contains("workroot detach <project> <worktree>"));
     assert!(help.contains("push         Push a target branch to its remote"));
     assert!(help.contains("workroot push <project> <worktree>"));
+    assert!(help.contains("pr           Create a GitHub PR for a pushed target branch"));
+    assert!(help.contains("workroot pr <project> <worktree>"));
     assert!(help.contains("status       Show worktrees; --json for scripts"));
     assert!(help.contains("workroot status [--json] [--refresh] [<project> [<worktree>]]"));
     assert!(
@@ -213,7 +223,8 @@ fn public_top_level_commands_parse_and_appear_in_help() {
     }
     assert!(!help.contains("Automation:"));
     for command in [
-        "status", "discover", "ignore", "unignore", "cd", "path", "new", "run", "push", "prune",
+        "status", "discover", "ignore", "unignore", "cd", "path", "new", "switch", "merge",
+        "detach", "run", "push", "pr", "prune",
     ] {
         assert!(help.contains(command), "help missing {command}");
     }
@@ -277,6 +288,33 @@ fn public_top_level_commands_parse_and_appear_in_help() {
         Commands::New { .. }
     ));
     assert!(matches!(
+        Cli::try_parse_from(["workroot", "new", "jam", "feature", "--branch"])
+            .unwrap()
+            .command,
+        Commands::New {
+            branch: Some(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        Cli::try_parse_from(["workroot", "switch", "jam", "auth", "-c", "feat/auth"])
+            .unwrap()
+            .command,
+        Commands::Switch { .. }
+    ));
+    assert!(matches!(
+        Cli::try_parse_from(["workroot", "merge", "jam", "auth", "--into", "main"])
+            .unwrap()
+            .command,
+        Commands::Merge { .. }
+    ));
+    assert!(matches!(
+        Cli::try_parse_from(["workroot", "detach", "jam", "auth"])
+            .unwrap()
+            .command,
+        Commands::Detach { .. }
+    ));
+    assert!(matches!(
         Cli::try_parse_from(["workroot", "run", "jam", "auth", "--", "runner"])
             .unwrap()
             .command,
@@ -287,6 +325,12 @@ fn public_top_level_commands_parse_and_appear_in_help() {
             .unwrap()
             .command,
         Commands::Push { .. }
+    ));
+    assert!(matches!(
+        Cli::try_parse_from(["workroot", "pr", "jam", "auth"])
+            .unwrap()
+            .command,
+        Commands::Pr { .. }
     ));
     assert!(matches!(
         Cli::try_parse_from(["workroot", "prune", "jam", "auth"])

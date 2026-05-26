@@ -337,7 +337,7 @@ fn unignore_rejects_unknown_entry() {
 }
 
 #[test]
-fn new_creates_branch_and_worktree_under_configured_root() {
+fn new_creates_detached_worktree_under_configured_root() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let root = temp.path().join("managed worktrees");
@@ -356,7 +356,37 @@ fn new_creates_branch_and_worktree_under_configured_root() {
 
     assert_eq!(output.trim(), expected.display().to_string());
     assert!(expected.join(".git").exists());
+    assert!(!branch_exists(&repo, "feature"));
+    assert_eq!(git_stdout(&["branch", "--show-current"], &expected), "");
+}
+
+#[test]
+fn new_branch_worktree_preserves_attached_behavior() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let root = temp.path().join("managed worktrees");
+    init_repo(&repo, "main");
+    let storage = storage(&temp.path().join("state"));
+    storage
+        .save_config(&Config {
+            default_worktree_root: Some(root.clone()),
+            ..Config::default()
+        })
+        .unwrap();
+    discovery::adopt(&storage, &Git::default(), &repo).unwrap();
+
+    let output =
+        discovery::new_branch_worktree(&storage, &Git::default(), "repo", "feature", "feature")
+            .unwrap();
+    let expected = root.join("repo").join("feature");
+
+    assert_eq!(output.trim(), expected.display().to_string());
+    assert!(expected.join(".git").exists());
     assert!(branch_exists(&repo, "feature"));
+    assert_eq!(
+        git_stdout(&["branch", "--show-current"], &expected),
+        "feature"
+    );
 }
 
 #[test]
@@ -406,7 +436,7 @@ fn new_fast_forwards_base_before_creating_worktree() {
     assert!(expected.join("remote.txt").exists());
     assert_eq!(
         git_stdout(&["rev-parse", "main"], &repo),
-        git_stdout(&["rev-parse", "feature"], &repo)
+        git_stdout(&["rev-parse", "HEAD"], &expected)
     );
 }
 
@@ -426,9 +456,10 @@ fn new_refuses_dirty_base_before_pulling() {
     let storage = storage(&temp.path().join("state"));
     discovery::adopt(&storage, &Git::default(), &repo).unwrap();
 
-    let error = discovery::new_worktree(&storage, &Git::default(), "repo", "feature")
-        .unwrap_err()
-        .to_string();
+    let error =
+        discovery::new_branch_worktree(&storage, &Git::default(), "repo", "feature", "feature")
+            .unwrap_err()
+            .to_string();
 
     assert!(error.contains("base worktree has uncommitted changes"));
     assert!(error.contains("git -C"));
@@ -451,7 +482,8 @@ fn new_reuses_existing_branch_without_worktree() {
         .unwrap();
     discovery::adopt(&storage, &Git::default(), &repo).unwrap();
 
-    discovery::new_worktree(&storage, &Git::default(), "repo", "feature").unwrap();
+    discovery::new_branch_worktree(&storage, &Git::default(), "repo", "feature", "feature")
+        .unwrap();
 
     assert!(root.join("repo").join("feature").join(".git").exists());
 }
@@ -473,9 +505,10 @@ fn new_refuses_existing_target_path_for_different_branch() {
         .unwrap();
     discovery::adopt(&storage, &Git::default(), &repo).unwrap();
 
-    let error = discovery::new_worktree(&storage, &Git::default(), "repo", "feature")
-        .unwrap_err()
-        .to_string();
+    let error =
+        discovery::new_branch_worktree(&storage, &Git::default(), "repo", "feature", "feature")
+            .unwrap_err()
+            .to_string();
 
     assert!(error.contains("target path exists as worktree for branch `other`"));
 }
@@ -490,9 +523,10 @@ fn new_refuses_branch_checked_out_elsewhere() {
     let storage = storage(&temp.path().join("state"));
     discovery::adopt(&storage, &Git::default(), &repo).unwrap();
 
-    let error = discovery::new_worktree(&storage, &Git::default(), "repo", "feature")
-        .unwrap_err()
-        .to_string();
+    let error =
+        discovery::new_branch_worktree(&storage, &Git::default(), "repo", "feature", "feature")
+            .unwrap_err()
+            .to_string();
 
     assert!(error.contains("already checked out"));
 }

@@ -202,6 +202,54 @@ pub fn path(storage: &FileStorage, repo: &str, target: Option<&str>) -> AppResul
 }
 
 pub fn new_worktree(storage: &FileStorage, git: &Git, repo: &str, name: &str) -> AppResult<String> {
+    new_detached_worktree(storage, git, repo, name)
+}
+
+pub fn new_detached_worktree(
+    storage: &FileStorage,
+    git: &Git,
+    repo: &str,
+    name: &str,
+) -> AppResult<String> {
+    let _transaction = storage.transaction()?;
+    let config = storage.load_config()?;
+    let cache = storage.load_cache()?;
+    let resolver = Resolver::new(cache);
+    let repo_record = resolver.resolve_repo(repo)?;
+    if repo_record.stale {
+        return Err(AppError::StaleWorktree(repo_record.canonical_path));
+    }
+
+    let target_path = default_worktree_root(&config)?
+        .join(&repo_record.alias)
+        .join(name);
+    let family = git.worktrees(&repo_record.canonical_path)?;
+    if target_path.exists() {
+        ensure_target_path_available(git, &repo_record, &family, &target_path, name)?;
+    }
+
+    let base = infer_base_branch(&config, git, &repo_record)?;
+    update_base_before_new(git, &repo_record, &base, name)?;
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|source| AppError::WriteFile {
+            kind: "worktree root",
+            path: parent.to_path_buf(),
+            source: Box::new(source),
+        })?;
+    }
+    git.add_detached_worktree(&repo_record.canonical_path, &target_path, &base)?;
+    refresh_after_new(storage, git, &repo_record.canonical_path)?;
+
+    Ok(format!("{}\n", target_path.display()))
+}
+
+pub fn new_branch_worktree(
+    storage: &FileStorage,
+    git: &Git,
+    repo: &str,
+    name: &str,
+    branch: &str,
+) -> AppResult<String> {
     let _transaction = storage.transaction()?;
     let config = storage.load_config()?;
     let cache = storage.load_cache()?;
@@ -217,7 +265,7 @@ pub fn new_worktree(storage: &FileStorage, git: &Git, repo: &str, name: &str) ->
     let family = git.worktrees(&repo_record.canonical_path)?;
     if let Some(existing) = family
         .iter()
-        .find(|entry| entry.branch.as_deref() == Some(name))
+        .find(|entry| entry.branch.as_deref() == Some(branch))
     {
         let existing_path = canonical_or_self(&existing.path);
         if existing_path == canonical_or_self(&target_path) {
@@ -225,42 +273,17 @@ pub fn new_worktree(storage: &FileStorage, git: &Git, repo: &str, name: &str) ->
             return Ok(format!("{}\n", existing.path.display()));
         }
         return Err(AppError::Git(format!(
-            "branch `{name}` is already checked out at {}; refusing to force",
+            "branch `{branch}` is already checked out at {}; refusing to force",
             existing.path.display()
         )));
     }
 
     if target_path.exists() {
-        let canonical_target = canonical_or_self(&target_path);
-        if let Some(existing) = family
-            .iter()
-            .find(|entry| canonical_or_self(&entry.path) == canonical_target)
-        {
-            if existing.branch.as_deref() == Some(name) {
-                refresh_after_new(storage, git, &repo_record.canonical_path)?;
-                return Ok(format!("{}\n", target_path.display()));
-            }
-            return Err(AppError::InvalidCommand(format!(
-                "target path exists as worktree for branch `{}`; refusing to report it as `{name}`",
-                existing.branch.as_deref().unwrap_or("detached")
-            )));
-        }
-        if let Ok(existing) = git.verify(&target_path)
-            && existing.common_dir == repo_record.git_common_dir
-        {
-            return Err(AppError::InvalidCommand(format!(
-                "target path exists as a worktree for this repo but is not registered in `git worktree list`: {}",
-                target_path.display()
-            )));
-        }
-        return Err(AppError::InvalidCommand(format!(
-            "target path already exists and is not the expected worktree: {}",
-            target_path.display()
-        )));
+        ensure_target_path_available(git, &repo_record, &family, &target_path, name)?;
     }
 
     let base = infer_base_branch(&config, git, &repo_record)?;
-    update_base_before_new(git, &repo_record, &base, name)?;
+    update_base_before_new(git, &repo_record, &base, branch)?;
     if let Some(parent) = target_path.parent() {
         fs::create_dir_all(parent).map_err(|source| AppError::WriteFile {
             kind: "worktree root",
@@ -268,19 +291,50 @@ pub fn new_worktree(storage: &FileStorage, git: &Git, repo: &str, name: &str) ->
             source: Box::new(source),
         })?;
     }
-    let created_branch = !git.branch_exists(&repo_record.canonical_path, name)?;
+    let created_branch = !git.branch_exists(&repo_record.canonical_path, branch)?;
     if created_branch {
-        git.create_branch(&repo_record.canonical_path, name, &base)?;
+        git.create_branch(&repo_record.canonical_path, branch, &base)?;
     }
-    if let Err(error) = git.add_worktree(&repo_record.canonical_path, &target_path, name) {
+    if let Err(error) = git.add_worktree(&repo_record.canonical_path, &target_path, branch) {
         if created_branch {
-            let _ = git.delete_branch(&repo_record.canonical_path, name);
+            let _ = git.delete_branch(&repo_record.canonical_path, branch);
         }
         return Err(error);
     }
     refresh_after_new(storage, git, &repo_record.canonical_path)?;
 
     Ok(format!("{}\n", target_path.display()))
+}
+
+fn ensure_target_path_available(
+    git: &Git,
+    repo_record: &RepoRecord,
+    family: &[GitWorktreeEntry],
+    target_path: &Path,
+    name: &str,
+) -> AppResult<()> {
+    let canonical_target = canonical_or_self(target_path);
+    if let Some(existing) = family
+        .iter()
+        .find(|entry| canonical_or_self(&entry.path) == canonical_target)
+    {
+        return Err(AppError::InvalidCommand(format!(
+            "target path exists as worktree for branch `{}`; refusing to report it as `{name}`",
+            existing.branch.as_deref().unwrap_or("detached")
+        )));
+    }
+    if let Ok(existing) = git.verify(target_path)
+        && existing.common_dir == repo_record.git_common_dir
+    {
+        return Err(AppError::InvalidCommand(format!(
+            "target path exists as a worktree for this repo but is not registered in `git worktree list`: {}",
+            target_path.display()
+        )));
+    }
+    Err(AppError::InvalidCommand(format!(
+        "target path already exists and is not the expected worktree: {}",
+        target_path.display()
+    )))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +392,10 @@ fn update_base_before_new(git: &Git, repo: &RepoRecord, base: &str, target: &str
             repo.alias
         ))
     })
+}
+
+pub fn refresh_family(storage: &FileStorage, git: &Git, path: &Path) -> AppResult<()> {
+    refresh_after_new(storage, git, path)
 }
 
 fn refresh_after_new(storage: &FileStorage, git: &Git, path: &Path) -> AppResult<()> {

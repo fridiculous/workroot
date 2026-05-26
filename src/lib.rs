@@ -1,9 +1,12 @@
+pub mod branch;
 pub mod cli;
 pub mod discovery;
 pub mod domain;
 pub mod error;
 pub mod git;
 pub mod lineage;
+pub mod merge;
+pub mod pr;
 pub mod prune;
 pub mod push;
 pub mod resolver;

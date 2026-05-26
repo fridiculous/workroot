@@ -254,12 +254,36 @@ impl Git {
         self.git(path, ["push", "-u", remote, branch]).map(|_| ())
     }
 
+    pub fn branch_checked_out_path(
+        &self,
+        repo_path: &Path,
+        branch: &str,
+    ) -> AppResult<Option<PathBuf>> {
+        let entries = self.worktrees(repo_path)?;
+        Ok(entries
+            .into_iter()
+            .find(|entry| entry.branch.as_deref() == Some(branch))
+            .map(|entry| entry.path))
+    }
+
     pub fn create_branch(&self, path: &Path, branch: &str, base: &str) -> AppResult<()> {
         self.git(path, ["branch", branch, base]).map(|_| ())
     }
 
     pub fn delete_branch(&self, path: &Path, branch: &str) -> AppResult<()> {
         self.git(path, ["branch", "-D", branch]).map(|_| ())
+    }
+
+    pub fn switch_create_branch(&self, path: &Path, branch: &str) -> AppResult<()> {
+        self.git(path, ["switch", "-c", branch]).map(|_| ())
+    }
+
+    pub fn switch_branch(&self, path: &Path, branch: &str) -> AppResult<()> {
+        self.git(path, ["switch", branch]).map(|_| ())
+    }
+
+    pub fn switch_detach(&self, path: &Path) -> AppResult<()> {
+        self.git(path, ["switch", "--detach"]).map(|_| ())
     }
 
     pub fn remove_worktree(&self, repo_path: &Path, worktree_path: &Path) -> AppResult<()> {
@@ -287,6 +311,25 @@ impl Git {
                 OsString::from("add"),
                 target_path.as_os_str().to_os_string(),
                 OsString::from(branch),
+            ],
+        )
+        .map(|_| ())
+    }
+
+    pub fn add_detached_worktree(
+        &self,
+        repo_path: &Path,
+        target_path: &Path,
+        commitish: &str,
+    ) -> AppResult<()> {
+        self.git_os(
+            repo_path,
+            [
+                OsString::from("worktree"),
+                OsString::from("add"),
+                OsString::from("--detach"),
+                target_path.as_os_str().to_os_string(),
+                OsString::from(commitish),
             ],
         )
         .map(|_| ())

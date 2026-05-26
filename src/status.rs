@@ -20,6 +20,8 @@ mod render;
 pub struct LiveWorktreeStatus {
     pub branch: BranchDisplay,
     pub head: Option<String>,
+    pub upstream: Option<String>,
+    pub unbranched_commits: bool,
     pub dirty: DirtyState,
     pub stale: bool,
 }
@@ -82,8 +84,11 @@ pub(crate) struct RadarWorktreeRow {
     pub(crate) repo: String,
     pub(crate) target: String,
     pub(crate) base_branch: String,
+    pub(crate) base_head: String,
     pub(crate) branch: String,
     pub(crate) head: String,
+    pub(crate) upstream: String,
+    pub(crate) unbranched_commits: bool,
     pub(crate) dirty: String,
     pub(crate) session: String,
     pub(crate) command: String,
@@ -283,11 +288,27 @@ fn live_statuses(cache: &Cache) -> BTreeMap<String, LiveWorktreeStatus> {
         } else {
             live_head_display(&worktree.path)
         };
+        let upstream = if stale {
+            None
+        } else {
+            live_upstream_display(&worktree.path)
+        };
+        let unbranched_commits = if stale || !matches!(branch, BranchDisplay::Detached) {
+            false
+        } else {
+            repos_by_alias
+                .get(worktree.repo_alias.as_str())
+                .and_then(|repo| repo.base_branch.as_deref())
+                .and_then(|base| live_unbranched_commits(&worktree.path, base))
+                .unwrap_or(false)
+        };
         statuses.insert(
             worktree_key(worktree),
             LiveWorktreeStatus {
                 branch,
                 head,
+                upstream,
+                unbranched_commits,
                 dirty: worktree.dirty,
                 stale,
             },
@@ -348,13 +369,26 @@ fn build_radar_view(
         }
 
         let state = radar_state(status, process.as_ref());
+        let base_branch = base_branch_label(repo);
         let row = RadarWorktreeRow {
             state,
             repo: worktree.repo_alias.clone(),
             target: worktree.target.clone(),
-            base_branch: base_branch_label(repo),
+            base_head: repo
+                .and_then(|repo| {
+                    repo.base_branch
+                        .as_deref()
+                        .and_then(|base| live_rev_display(&repo.canonical_path, base))
+                })
+                .unwrap_or_else(|| "unknown".to_string()),
+            base_branch,
             branch: branch_label(&status.branch),
             head: status_head_label(status),
+            upstream: status
+                .upstream
+                .clone()
+                .unwrap_or_else(|| "none".to_string()),
+            unbranched_commits: status.unbranched_commits,
             dirty: status_dirty_label(status),
             session: process
                 .as_ref()
@@ -828,10 +862,14 @@ fn live_branch_display(path: &Path) -> Option<BranchDisplay> {
 }
 
 fn live_head_display(path: &Path) -> Option<String> {
+    live_rev_display(path, "HEAD")
+}
+
+fn live_rev_display(path: &Path, rev: &str) -> Option<String> {
     let output = Command::new("git")
         .args(["-C"])
         .arg(path)
-        .args(["rev-parse", "--short=8", "HEAD"])
+        .args(["rev-parse", "--short=8", rev])
         .output()
         .ok()?;
 
@@ -840,6 +878,42 @@ fn live_head_display(path: &Path) -> Option<String> {
         (!head.is_empty()).then_some(head)
     } else {
         None
+    }
+}
+
+fn live_upstream_display(path: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["-C"])
+        .arg(path)
+        .args([
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        (!upstream.is_empty()).then_some(upstream)
+    } else {
+        None
+    }
+}
+
+fn live_unbranched_commits(path: &Path, base: &str) -> Option<bool> {
+    let status = Command::new("git")
+        .args(["-C"])
+        .arg(path)
+        .args(["merge-base", "--is-ancestor", "HEAD", base])
+        .status()
+        .ok()?;
+
+    match status.code() {
+        Some(0) => Some(false),
+        Some(1) => Some(true),
+        _ => None,
     }
 }
 
@@ -940,14 +1014,13 @@ mod tests {
         let cache = sample_cache(false, false, DirtyState::Clean);
         let output = list_output(&cache, None);
 
-        assert!(output.contains("REPO"));
-        assert!(output.contains("BASE BRANCH"));
-        assert!(output.contains("WORKTREE BRANCH"));
-        assert!(output.contains("HEAD"));
-        assert!(output.contains("jam"));
+        assert!(output.contains("repo jam"));
+        assert!(output.contains("base main @ unknown"));
+        assert!(output.contains("worktree auth"));
+        assert!(output.contains("head -> branch missing-branch @ stale"));
         assert!(output.contains("missing-branch"));
         assert!(output.contains("stale"));
-        assert!(!output.contains("FLAGS"));
+        assert!(output.contains("branch locked here"));
     }
 
     #[test]
