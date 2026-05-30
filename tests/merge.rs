@@ -31,20 +31,6 @@ fn git(args: &[&str], cwd: &Path) {
     );
 }
 
-fn git_fails(args: &[&str], cwd: &Path) {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        !output.status.success(),
-        "git {:?} unexpectedly succeeded",
-        args
-    );
-}
-
 fn git_stdout(args: &[&str], cwd: &Path) -> String {
     let output = Command::new("git")
         .arg("-C")
@@ -198,6 +184,6 @@ fn merge_leaves_conflict_state_in_destination_worktree() {
 
     assert!(error.contains("has conflicts"));
     assert!(error.contains(&destination.display().to_string()));
-    git_fails(&["diff", "--check"], &destination);
+    assert!(git_stdout(&["ls-files", "-u", "README.md"], &destination).contains("README.md"));
     assert!(git_stdout(&["status", "--porcelain"], &destination).contains("UU README.md"));
 }
