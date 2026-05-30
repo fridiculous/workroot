@@ -184,6 +184,9 @@ fn merge_leaves_conflict_state_in_destination_worktree() {
 
     assert!(error.contains("has conflicts"));
     assert!(error.contains(&destination.display().to_string()));
-    assert!(git_stdout(&["ls-files", "-u", "README.md"], &destination).contains("README.md"));
-    assert!(git_stdout(&["status", "--porcelain"], &destination).contains("UU README.md"));
+    let readme = fs::read_to_string(destination.join("README.md")).unwrap();
+    assert!(readme.contains("<<<<<<<"));
+    assert!(readme.contains("source change"));
+    assert!(readme.contains("destination change"));
+    assert!(git_stdout(&["status", "--porcelain"], &destination).contains("README.md"));
 }
