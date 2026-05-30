@@ -59,6 +59,8 @@ fn init_repo(path: &Path, branch: &str) {
         "git init failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    git(&["config", "user.name", "Workroot Test"], path);
+    git(&["config", "user.email", "workroot@example.test"], path);
     commit_file(path, "README.md", "hello", "init");
 }
 
