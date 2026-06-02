@@ -168,6 +168,28 @@ fn merge_refuses_missing_destination_branch_worktree() {
 }
 
 #[test]
+fn merge_refuses_destination_worktree_on_different_live_branch() {
+    let (_temp, storage, root) = setup_merge_env();
+    let source = root.join("repo").join("task");
+    let destination = root.join("repo").join("integration");
+    commit_file(&source, "agent.txt", "agent work", "agent work");
+    git(&["switch", "-c", "other"], &destination);
+    let before = git_stdout(&["rev-parse", "HEAD"], &destination);
+
+    let error = merge_worktree(&storage, &Git::default(), "repo", "task", "integration")
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("destination branch `integration` is not currently checked out"));
+    assert!(error.contains("current branch is `other`"));
+    assert_eq!(
+        git_stdout(&["branch", "--show-current"], &destination),
+        "other"
+    );
+    assert_eq!(git_stdout(&["rev-parse", "HEAD"], &destination), before);
+}
+
+#[test]
 fn merge_leaves_conflict_state_in_destination_worktree() {
     let (_temp, storage, root) = setup_merge_env();
     let source = root.join("repo").join("task");

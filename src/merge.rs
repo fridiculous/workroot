@@ -29,6 +29,17 @@ pub fn merge_worktree(
             resolved.worktree.target
         )));
     }
+    let current_branch = git.current_branch(&destination.path)?;
+    if current_branch.as_deref() != Some(into_branch) {
+        let current = current_branch
+            .as_deref()
+            .unwrap_or("detached HEAD")
+            .to_string();
+        return Err(AppError::InvalidCommand(format!(
+            "destination branch `{into_branch}` is not currently checked out at {}; current branch is `{current}`\nfix: switch that worktree back to `{into_branch}` or refresh Workroot",
+            destination.path.display()
+        )));
+    }
     if git.is_dirty(&destination.path)? {
         return Err(AppError::InvalidCommand(format!(
             "destination branch `{into_branch}` has uncommitted changes at {}; commit or stash before merging",
