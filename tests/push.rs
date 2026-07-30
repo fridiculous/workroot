@@ -154,7 +154,8 @@ fn push_sets_upstream_on_first_push() {
         .unwrap();
     discovery::adopt(&storage, &Git::default(), &repo).unwrap();
     let feature_path = root.join("repo").join("feature");
-    discovery::new_worktree(&storage, &Git::default(), "repo", "feature").unwrap();
+    discovery::new_branch_worktree(&storage, &Git::default(), "repo", "feature", "feature")
+        .unwrap();
     commit_file(&feature_path, "feature.txt", "feature commit");
 
     let output = push_worktree(&storage, &Git::default(), "repo", "feature").unwrap();
@@ -205,7 +206,8 @@ fn push_outcome_exposes_json_ready_fields() {
         .unwrap();
     discovery::adopt(&storage, &Git::default(), &repo).unwrap();
     let feature_path = root.join("repo").join("feature");
-    discovery::new_worktree(&storage, &Git::default(), "repo", "feature").unwrap();
+    discovery::new_branch_worktree(&storage, &Git::default(), "repo", "feature", "feature")
+        .unwrap();
     commit_file(&feature_path, "feature.txt", "feature commit");
 
     let outcome = push_worktree_outcome(&storage, &Git::default(), "repo", "feature").unwrap();
@@ -246,7 +248,8 @@ fn push_uses_existing_upstream_after_first_push() {
         .unwrap();
     discovery::adopt(&storage, &Git::default(), &repo).unwrap();
     let feature_path = root.join("repo").join("feature");
-    discovery::new_worktree(&storage, &Git::default(), "repo", "feature").unwrap();
+    discovery::new_branch_worktree(&storage, &Git::default(), "repo", "feature", "feature")
+        .unwrap();
 
     commit_file(&feature_path, "feature.txt", "first feature commit");
     push_worktree(&storage, &Git::default(), "repo", "feature").unwrap();
@@ -321,7 +324,6 @@ fn push_refuses_detached_worktree() {
     let feature_path = root.join("repo").join("feature");
     discovery::new_worktree(&storage, &Git::default(), "repo", "feature").unwrap();
     commit_file(&feature_path, "feature.txt", "feature commit");
-    git(&["checkout", "--detach"], &feature_path);
 
     let error = push_worktree(&storage, &Git::default(), "repo", "feature")
         .unwrap_err()
@@ -329,7 +331,7 @@ fn push_refuses_detached_worktree() {
 
     assert!(error.contains("detached"), "unexpected error: {error}");
     assert!(
-        error.contains("branch to push"),
+        error.contains("workroot switch repo feature -c <branch>"),
         "unexpected error: {error}"
     );
 }

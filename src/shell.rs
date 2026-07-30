@@ -61,7 +61,7 @@ wr() {
 
 _workroot_complete() {
   local -a candidates
-  if [[ "${words[2]}" == "cd" || "${words[2]}" == "path" || "${words[2]}" == "status" || "${words[2]}" == "prune" || "${words[2]}" == "run" ]]; then
+  if [[ "${words[2]}" == "switch" || "${words[2]}" == "merge" || "${words[2]}" == "cd" || "${words[2]}" == "detach" || "${words[2]}" == "path" || "${words[2]}" == "pr" || "${words[2]}" == "status" || "${words[2]}" == "prune" || "${words[2]}" == "push" || "${words[2]}" == "run" ]]; then
     if (( CURRENT == 3 )); then
       candidates=(${(f)"$(command workroot complete repos "${words[CURRENT]}" 2>/dev/null)"})
       compadd -- "$candidates[@]"
@@ -74,7 +74,7 @@ _workroot_complete() {
       candidates=(${(f)"$(command workroot complete repos "${words[CURRENT]}" 2>/dev/null)"})
       compadd -- "$candidates[@]"
     fi
-  elif [[ ( "${words[2]}" == "worktree" || "${words[2]}" == "workdir" ) && ( "${words[3]}" == "cd" || "${words[3]}" == "path" || "${words[3]}" == "prune" || "${words[3]}" == "run" ) ]]; then
+  elif [[ ( "${words[2]}" == "worktree" || "${words[2]}" == "workdir" ) && ( "${words[3]}" == "switch" || "${words[3]}" == "merge" || "${words[3]}" == "cd" || "${words[3]}" == "detach" || "${words[3]}" == "path" || "${words[3]}" == "pr" || "${words[3]}" == "prune" || "${words[3]}" == "push" || "${words[3]}" == "run" ) ]]; then
     if (( CURRENT == 4 )); then
       candidates=(${(f)"$(command workroot complete repos "${words[CURRENT]}" 2>/dev/null)"})
       compadd -- "$candidates[@]"
@@ -131,7 +131,7 @@ _workroot_complete() {
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   cmd="${COMP_WORDS[1]}"
-  if [[ "$cmd" == "cd" || "$cmd" == "path" || "$cmd" == "status" || "$cmd" == "prune" || "$cmd" == "run" ]]; then
+  if [[ "$cmd" == "switch" || "$cmd" == "merge" || "$cmd" == "cd" || "$cmd" == "detach" || "$cmd" == "path" || "$cmd" == "pr" || "$cmd" == "status" || "$cmd" == "prune" || "$cmd" == "push" || "$cmd" == "run" ]]; then
     if [[ $COMP_CWORD -eq 2 ]]; then
       while IFS= read -r candidate; do COMPREPLY+=("$candidate"); done < <(command workroot complete repos "$cur" 2>/dev/null)
     elif [[ $COMP_CWORD -eq 3 ]]; then
@@ -142,7 +142,7 @@ _workroot_complete() {
     if [[ $COMP_CWORD -eq 2 ]]; then
       while IFS= read -r candidate; do COMPREPLY+=("$candidate"); done < <(command workroot complete repos "$cur" 2>/dev/null)
     fi
-  elif [[ ( "$cmd" == "worktree" || "$cmd" == "workdir" ) && ( "${COMP_WORDS[2]}" == "cd" || "${COMP_WORDS[2]}" == "path" || "${COMP_WORDS[2]}" == "prune" || "${COMP_WORDS[2]}" == "run" ) ]]; then
+  elif [[ ( "$cmd" == "worktree" || "$cmd" == "workdir" ) && ( "${COMP_WORDS[2]}" == "switch" || "${COMP_WORDS[2]}" == "merge" || "${COMP_WORDS[2]}" == "cd" || "${COMP_WORDS[2]}" == "detach" || "${COMP_WORDS[2]}" == "path" || "${COMP_WORDS[2]}" == "pr" || "${COMP_WORDS[2]}" == "prune" || "${COMP_WORDS[2]}" == "push" || "${COMP_WORDS[2]}" == "run" ) ]]; then
     if [[ $COMP_CWORD -eq 3 ]]; then
       while IFS= read -r candidate; do COMPREPLY+=("$candidate"); done < <(command workroot complete repos "$cur" 2>/dev/null)
     elif [[ $COMP_CWORD -eq 4 ]]; then
@@ -200,11 +200,11 @@ function __workroot_complete_targets
     command workroot complete targets $tokens[3] (commandline -ct) 2>/dev/null
   end
 end
-complete -c workroot -f -n '__fish_seen_subcommand_from cd path status prune run; and test (count (commandline -opc)) -le 2' -a '(__workroot_complete_repos)'
-complete -c workroot -f -n '__fish_seen_subcommand_from cd path status prune run; and test (count (commandline -opc)) -eq 3' -a '(__workroot_complete_targets)'
+complete -c workroot -f -n '__fish_seen_subcommand_from switch merge cd detach path pr status prune push run; and test (count (commandline -opc)) -le 2' -a '(__workroot_complete_repos)'
+complete -c workroot -f -n '__fish_seen_subcommand_from switch merge cd detach path pr status prune push run; and test (count (commandline -opc)) -eq 3' -a '(__workroot_complete_targets)'
 complete -c workroot -f -n '__fish_seen_subcommand_from new; and test (count (commandline -opc)) -le 2' -a '(__workroot_complete_repos)'
-complete -c workroot -f -n 'set -l tokens (commandline -opc); contains -- "$tokens[2]" worktree workdir; and contains -- "$tokens[3]" cd path prune run; and test (count $tokens) -le 3' -a '(__workroot_complete_repos)'
-complete -c workroot -f -n 'set -l tokens (commandline -opc); contains -- "$tokens[2]" worktree workdir; and contains -- "$tokens[3]" cd path prune run; and test (count $tokens) -eq 4' -a '(__workroot_complete_targets)'
+complete -c workroot -f -n 'set -l tokens (commandline -opc); contains -- "$tokens[2]" worktree workdir; and contains -- "$tokens[3]" switch merge cd detach path pr prune push run; and test (count $tokens) -le 3' -a '(__workroot_complete_repos)'
+complete -c workroot -f -n 'set -l tokens (commandline -opc); contains -- "$tokens[2]" worktree workdir; and contains -- "$tokens[3]" switch merge cd detach path pr prune push run; and test (count $tokens) -eq 4' -a '(__workroot_complete_targets)'
 complete -c workroot -f -n 'set -l tokens (commandline -opc); contains -- "$tokens[2]" worktree workdir; and test "$tokens[3]" = new; and test (count $tokens) -le 3' -a '(__workroot_complete_repos)'
 complete -c wr -w workroot
 "#;

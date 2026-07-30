@@ -47,9 +47,10 @@ pub fn push_worktree_outcome(
 
     if resolved.worktree.detached {
         return Err(AppError::InvalidCommand(format!(
-            "target `{}` is detached; choose a branch to push first\nfix: run `git -C {} checkout <branch>`\nthen: run `workroot push {} {}`",
+            "target `{}` is detached; create a branch before pushing\nfix: run `workroot switch {} {} -c <branch>`\nthen: run `workroot push {} {}`",
             resolved.worktree.target,
-            resolved.path.display(),
+            resolved.repo.alias,
+            resolved.worktree.target,
             resolved.repo.alias,
             resolved.worktree.target,
         )));
@@ -57,9 +58,10 @@ pub fn push_worktree_outcome(
 
     let branch = git.current_branch(&resolved.path)?.ok_or_else(|| {
         AppError::InvalidCommand(format!(
-            "target `{}` is detached; choose a branch to push first\nfix: run `git -C {} checkout <branch>`\nthen: run `workroot push {} {}`",
+            "target `{}` is detached; create a branch before pushing\nfix: run `workroot switch {} {} -c <branch>`\nthen: run `workroot push {} {}`",
             resolved.worktree.target,
-            resolved.path.display(),
+            resolved.repo.alias,
+            resolved.worktree.target,
             resolved.repo.alias,
             resolved.worktree.target,
         ))

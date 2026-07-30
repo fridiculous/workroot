@@ -323,7 +323,8 @@ fn top_level_new_can_print_json_for_chaining() {
     assert_eq!(json["command"], "new");
     assert_eq!(json["repo"], "repo");
     assert_eq!(json["target"], "feature");
-    assert_eq!(json["branch"], "feature");
+    assert!(json["branch"].is_null());
+    assert_eq!(json["detached"], true);
     assert_eq!(json["path"], expected.display().to_string());
     assert!(expected.join(".git").exists());
 }

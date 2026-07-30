@@ -22,11 +22,23 @@ use crate::status::{
 use crate::storage::FileStorage;
 
 const GLOBAL_HELP: &str = r#"Worktree lifecycle:
-  [1mnew[0m          Create a target worktree from the repo base branch
-               workroot new [-o json] <project> <worktree>
+  [1mnew[0m          Create a detached target worktree from the repo base branch
+               workroot new [-o json] <project> <worktree> [--branch [<branch>]]
+
+  [1mswitch[0m       Switch a target worktree, creating a branch with -c
+               workroot switch <project> <worktree> -c <branch>
+
+  [1mmerge[0m        Merge a target HEAD into an existing branch worktree
+               workroot merge <project> <worktree> --into <branch>
+
+  [1mdetach[0m       Detach a branch-backed target at its current HEAD
+               workroot detach <project> <worktree>
 
   [1mpush[0m         Push a target branch to its remote
                workroot push [-o json] <project> <worktree>
+
+  [1mpr[0m           Create a GitHub PR for a pushed target branch
+               workroot pr <project> <worktree>
 
   [1mprune[0m        Remove merged worktrees with proof and confirmation
                workroot prune [<project> [<worktree>]]
@@ -64,6 +76,8 @@ Getting started
 
   workroot discover ~/projects/my-app
   workroot new my-app my-feature
+  workroot switch my-app my-feature -c feat/my-feature
+  workroot merge my-app my-feature --into main
   workroot run my-app my-feature -- make test
   workroot push my-app my-feature
 
@@ -98,11 +112,13 @@ Install shell integration first:
   eval "$(workroot shell-init zsh)""##;
 
 const NEW_HELP: &str = r#"Command shape:
-  workroot new [-o json] <project> <worktree>
+  workroot new [-o json] <project> <worktree> [--branch [<branch>]]
 
 Examples:
   workroot new my-app my-feature
   workroot new -o json my-app my-feature
+  workroot new my-app my-feature --branch
+  workroot new my-app my-feature --branch feat/my-feature
 
 If the repo is not known yet, first run:
   workroot discover
@@ -110,6 +126,21 @@ or point Workroot directly at it:
   workroot discover /path/to/repo
 
 Shell integration changes the current shell directory after creating the worktree. Direct binary use prints the path because a child process cannot cd its parent shell."#;
+
+const SWITCH_HELP: &str = r#"Command shape:
+  workroot switch <project> <worktree> -c <branch>
+
+Creates a branch at the target worktree's current HEAD and checks it out there."#;
+
+const DETACH_HELP: &str = r#"Command shape:
+  workroot detach <project> <worktree>
+
+Detaches a branch-backed worktree at its current HEAD. The worktree must be clean."#;
+
+const MERGE_HELP: &str = r#"Command shape:
+  workroot merge <project> <worktree> --into <branch>
+
+Merges the source target's current HEAD into an existing clean destination branch worktree."#;
 
 const RUN_HELP: &str = r#"Command shape:
   workroot run <project> <worktree> -- <CMD>...
@@ -128,6 +159,11 @@ Examples:
   workroot push -o json my-app my-feature
 
 If the branch has no upstream, Workroot pushes with `-u origin <branch>`. Otherwise it runs a normal `git push`."#;
+
+const PR_HELP: &str = r#"Command shape:
+  workroot pr <project> <worktree>
+
+Creates a GitHub PR with `gh pr create --base <base> --head <branch>`."#;
 
 const PRUNE_HELP: &str = r#"Command shapes:
   workroot prune
@@ -234,6 +270,78 @@ pub enum Commands {
         target: String,
     },
     #[command(
+        about = "Switch a target worktree, creating a branch with -c",
+        override_usage = "workroot switch <project> <worktree> -c <branch>",
+        after_help = SWITCH_HELP
+    )]
+    Switch {
+        #[arg(
+            value_name = "PROJECT",
+            help = "Project name, repo alias, or display name"
+        )]
+        repo: String,
+        #[arg(value_name = "WORKTREE", help = "Worktree target or display name")]
+        target: String,
+        #[arg(
+            short = 'c',
+            long = "create",
+            value_name = "BRANCH",
+            help = "Branch name to create at the target HEAD"
+        )]
+        create: String,
+    },
+    #[command(
+        about = "Merge a target HEAD into an existing branch worktree",
+        override_usage = "workroot merge <project> <worktree> --into <branch>",
+        after_help = MERGE_HELP
+    )]
+    Merge {
+        #[arg(
+            value_name = "PROJECT",
+            help = "Project name, repo alias, or display name"
+        )]
+        repo: String,
+        #[arg(
+            value_name = "WORKTREE",
+            help = "Source worktree target or display name"
+        )]
+        target: String,
+        #[arg(
+            long,
+            value_name = "BRANCH",
+            help = "Destination branch checked out in a known clean worktree"
+        )]
+        into: String,
+    },
+    #[command(
+        about = "Detach a branch-backed target at its current HEAD",
+        override_usage = "workroot detach <project> <worktree>",
+        after_help = DETACH_HELP
+    )]
+    Detach {
+        #[arg(
+            value_name = "PROJECT",
+            help = "Project name, repo alias, or display name"
+        )]
+        repo: String,
+        #[arg(value_name = "WORKTREE", help = "Worktree target or display name")]
+        target: String,
+    },
+    #[command(
+        about = "Create a GitHub PR for a pushed target branch",
+        override_usage = "workroot pr <project> <worktree>",
+        after_help = PR_HELP
+    )]
+    Pr {
+        #[arg(
+            value_name = "PROJECT",
+            help = "Project name, repo alias, or display name"
+        )]
+        repo: String,
+        #[arg(value_name = "WORKTREE", help = "Worktree target or display name")]
+        target: String,
+    },
+    #[command(
         about = "Safely remove worktrees proven merged",
         override_usage = "workroot prune [<project> [<worktree>]]",
         after_help = PRUNE_HELP
@@ -307,6 +415,14 @@ pub enum Commands {
         repo: String,
         #[arg(value_name = "WORKTREE", help = "New worktree target and branch name")]
         target: String,
+        #[arg(
+            long,
+            value_name = "BRANCH",
+            num_args = 0..=1,
+            default_missing_value = "",
+            help = "Create an attached branch worktree; defaults branch name to WORKTREE"
+        )]
+        branch: Option<String>,
     },
     #[command(
         about = "Index repos from configured roots or one explicit path",
@@ -414,8 +530,30 @@ pub enum WorktreeCommand {
     New {
         repo: String,
         target: String,
+        #[arg(long, value_name = "BRANCH", num_args = 0..=1, default_missing_value = "")]
+        branch: Option<String>,
     },
     Push {
+        repo: String,
+        target: String,
+    },
+    Switch {
+        repo: String,
+        target: String,
+        #[arg(short = 'c', long = "create", value_name = "BRANCH")]
+        create: String,
+    },
+    Merge {
+        repo: String,
+        target: String,
+        #[arg(long, value_name = "BRANCH")]
+        into: String,
+    },
+    Detach {
+        repo: String,
+        target: String,
+    },
+    Pr {
         repo: String,
         target: String,
     },
@@ -539,6 +677,27 @@ pub fn run(cli: Cli) -> AppResult<Option<String>> {
             repo,
             target,
         } => push_output(&storage, output_or_text(output), &repo, &target).map(Some),
+        Commands::Switch {
+            repo,
+            target,
+            create,
+        } => run_worktree(
+            &storage,
+            WorktreeCommand::Switch {
+                repo,
+                target,
+                create,
+            },
+        ),
+        Commands::Merge { repo, target, into } => {
+            run_worktree(&storage, WorktreeCommand::Merge { repo, target, into })
+        }
+        Commands::Detach { repo, target } => {
+            run_worktree(&storage, WorktreeCommand::Detach { repo, target })
+        }
+        Commands::Pr { repo, target } => {
+            run_worktree(&storage, WorktreeCommand::Pr { repo, target })
+        }
         Commands::Prune { repo, target } => {
             run_worktree(&storage, WorktreeCommand::Prune { repo, target })
         }
@@ -562,7 +721,10 @@ pub fn run(cli: Cli) -> AppResult<Option<String>> {
             output,
             repo,
             target,
-        } => new_worktree_output(&storage, output_or_text(output), &repo, &target).map(Some),
+            branch,
+        } => {
+            new_worktree_output(&storage, output_or_text(output), &repo, &target, branch).map(Some)
+        }
         Commands::Discover { path } => {
             discovery::discover(&storage, &Git::default(), path.as_deref()).map(Some)
         }
@@ -662,13 +824,18 @@ fn new_worktree_output(
     output: OutputFormat,
     repo: &str,
     target: &str,
+    branch: Option<String>,
 ) -> AppResult<String> {
+    let git = Git::default();
+    let create = |storage: &FileStorage| match branch.as_deref() {
+        Some("") => discovery::new_branch_worktree(storage, &git, repo, target, target),
+        Some(branch) => discovery::new_branch_worktree(storage, &git, repo, target, branch),
+        None => discovery::new_worktree(storage, &git, repo, target),
+    };
     match output {
-        OutputFormat::Text => discovery::new_worktree(storage, &Git::default(), repo, target),
+        OutputFormat::Text => create(storage),
         OutputFormat::Json => {
-            let path = discovery::new_worktree(storage, &Git::default(), repo, target)?
-                .trim_end_matches('\n')
-                .to_string();
+            let path = create(storage)?.trim_end_matches('\n').to_string();
             let resolved =
                 Resolver::new(storage.load_cache()?).resolve_worktree(repo, Some(target))?;
             render_worktree_json_with_path("new", &resolved, path)
@@ -763,11 +930,37 @@ fn run_worktree(storage: &FileStorage, command: WorktreeCommand) -> AppResult<Op
         WorktreeCommand::Path { repo, target } | WorktreeCommand::Cd { repo, target } => {
             resolved_path_output(storage, &repo, target.as_deref()).map(Some)
         }
-        WorktreeCommand::New { repo, target } => {
-            discovery::new_worktree(storage, &Git::default(), &repo, &target).map(Some)
+        WorktreeCommand::New {
+            repo,
+            target,
+            branch,
+        } => {
+            let git = Git::default();
+            match branch {
+                Some(branch) => {
+                    let branch = if branch.is_empty() { &target } else { &branch };
+                    discovery::new_branch_worktree(storage, &git, &repo, &target, branch).map(Some)
+                }
+                None => discovery::new_worktree(storage, &git, &repo, &target).map(Some),
+            }
         }
         WorktreeCommand::Push { repo, target } => {
             crate::push::push_worktree(storage, &Git::default(), &repo, &target).map(Some)
+        }
+        WorktreeCommand::Switch {
+            repo,
+            target,
+            create,
+        } => crate::branch::branch_worktree(storage, &Git::default(), &repo, &target, &create)
+            .map(Some),
+        WorktreeCommand::Merge { repo, target, into } => {
+            crate::merge::merge_worktree(storage, &Git::default(), &repo, &target, &into).map(Some)
+        }
+        WorktreeCommand::Detach { repo, target } => {
+            crate::branch::detach_worktree(storage, &Git::default(), &repo, &target).map(Some)
+        }
+        WorktreeCommand::Pr { repo, target } => {
+            crate::pr::create_pr(storage, &Git::default(), &repo, &target).map(Some)
         }
         WorktreeCommand::Adopt { path } => {
             discovery::adopt(storage, &Git::default(), &path).map(Some)

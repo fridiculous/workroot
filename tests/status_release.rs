@@ -19,12 +19,11 @@ fn list_shows_global_known_worktrees() {
 
     let output = list_output(&cache, None);
 
-    assert!(output.contains("REPO"));
-    assert!(output.contains("BASE BRANCH"));
-    assert!(output.contains("WORKTREE BRANCH"));
-    assert!(output.contains("HEAD"));
-    assert!(output.contains("jam"));
-    assert!(output.contains("main"));
+    assert!(output.contains("repo jam"));
+    assert!(output.contains("base main @ unknown"));
+    assert!(output.contains("worktree base"));
+    assert!(output.contains("head -> branch main @ stale"));
+    assert!(output.contains("branch locked here"));
     assert!(output.contains("/tmp/jam"));
 }
 
@@ -116,13 +115,11 @@ fn radar_status_adds_managed_session_columns_to_worktrees() {
     );
 
     assert!(output.contains("SUMMARY"));
-    assert!(output.contains("ACTIVE PROCESSES"));
-    assert!(output.contains("STATE"));
-    assert!(output.contains("RUN"));
+    assert!(output.contains("repo jam"));
+    assert!(output.contains("worktree base"));
+    assert!(output.contains("session workroot-jam-base"));
     assert!(output.contains("active-panes=1"));
     assert!(output.contains("managed-running=1"));
-    assert!(output.contains("SESSION"));
-    assert!(output.contains("COMMAND"));
     assert!(output.contains("workroot-jam-base"));
     assert!(output.contains("make"));
 }
@@ -208,8 +205,9 @@ fn radar_status_surfaces_missing_managed_session_as_attention_exit() {
         },
     );
 
-    assert!(output.contains("ATTENTION"));
-    assert!(output.contains("EXIT"));
+    assert!(output.contains("repo jam"));
+    assert!(output.contains("worktree base"));
+    assert!(output.contains("session workroot-jam-base"));
     assert!(output.contains("exited=1"));
     assert!(output.contains("workroot-jam-base"));
     assert!(output.contains("make"));
@@ -240,8 +238,9 @@ fn radar_status_maps_unmanaged_tmux_cwd_inside_known_worktree() {
         },
     );
 
-    assert!(output.contains("ACTIVE PROCESSES"));
-    assert!(output.contains("MAP"));
+    assert!(output.contains("repo jam"));
+    assert!(output.contains("worktree base"));
+    assert!(output.contains("session scratch"));
     assert!(output.contains("scratch"));
     assert!(output.contains("vim"));
     assert!(output.contains("unmapped=0"));
@@ -306,10 +305,10 @@ fn radar_status_counts_dirty_and_stale_worktrees_in_attention() {
 
     assert!(output.contains("dirty=1"));
     assert!(output.contains("stale=1"));
-    assert!(output.contains("ATTENTION"));
-    assert!(output.contains("DIRTY"));
+    assert!(output.contains("worktree dirty"));
     assert!(output.contains("dirty(3)"));
-    assert!(output.contains("STALE"));
+    assert!(output.contains("worktree gone"));
+    assert!(output.contains("state stale"));
     assert!(output.contains(&missing_path.display().to_string()));
 }
 
@@ -346,7 +345,7 @@ fn radar_status_keeps_worktrees_when_tmux_is_unavailable() {
     assert!(output.contains("jam"));
     assert!(output.contains("tmux=unavailable"));
     assert!(output.contains("active-panes=unknown"));
-    assert!(output.contains("UNKNOWN"));
+    assert!(output.contains("session workroot-jam-base"));
     assert!(output.contains("workroot-jam-base"));
     assert!(output.contains("UNMAPPED TMUX"));
 }

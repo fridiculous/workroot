@@ -429,8 +429,9 @@ fn status_renders_managed_and_unmapped_tmux_inventory() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("ACTIVE PROCESSES"));
-    assert!(stdout.contains("RUN"));
+    assert!(stdout.contains("repo jam repo"));
+    assert!(stdout.contains("worktree auth/flow"));
+    assert!(stdout.contains("session"));
     assert!(stdout.contains(&env.session_name()));
     assert!(stdout.contains("UNMAPPED TMUX"));
     assert!(stdout.contains("UNMAPPED"));
